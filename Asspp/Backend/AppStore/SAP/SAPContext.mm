@@ -2,16 +2,23 @@
 #import <CommonCrypto/CommonDigest.h>
 #include "SapMachine.h"
 
+// prepare.sap.py stores every asset as "<name>.sapdata" = kAssetPrefix + raw bytes, so the
+// bundle holds no bare Mach-O that Xcode's distribution re-signer could rewrite. The
+// size and SHA-256 pins below still describe the raw Apple bytes.
+static const char kAssetPrefix[] = "ASSPPSAP";
+static const NSUInteger kAssetPrefixLength = sizeof(kAssetPrefix) - 1;
+
 static std::vector<uint8_t> ReadVerifiedAsset(NSURL *root, NSString *name, NSUInteger size, NSString *hash) {
-    NSData *data = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:name]];
-    if (data.length != size) throw std::runtime_error("Missing or truncated SAP assets. Rebuild the app.");
+    NSData *data = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:[name stringByAppendingString:@".sapdata"]]];
+    if (data.length != size + kAssetPrefixLength || memcmp(data.bytes, kAssetPrefix, kAssetPrefixLength) != 0)
+        throw std::runtime_error("Missing or truncated SAP assets. Rebuild the app.");
+    auto bytes = static_cast<const uint8_t *>(data.bytes) + kAssetPrefixLength;
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+    CC_SHA256(bytes, (CC_LONG)size, digest);
     NSMutableString *actual = [NSMutableString string];
     for (unsigned char byte : digest) [actual appendFormat:@"%02x", byte];
     if (![actual isEqualToString:hash]) throw std::runtime_error("SAP asset integrity check failed. Rebuild the app.");
-    auto bytes = static_cast<const uint8_t *>(data.bytes);
-    return {bytes, bytes + data.length};
+    return {bytes, bytes + size};
 }
 
 static void SetError(NSError **error, const std::exception &exception) {

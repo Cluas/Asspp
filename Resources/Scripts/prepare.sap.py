@@ -24,6 +24,12 @@ PAYLOAD_BLOCK_OFFSET = 0x352F40D5
 CPIO_RESUME_OFFSET = 0x3A4
 
 APPLE_URL = 'https://swcdn.apple.com/content/downloads/27/34/041-98128-A_SYPWICN3KH/5dqkl4rqgbsr18yzy61yeie9g3cmjc5hiv/OSXUpd10.9.pkg'
+# Xcode's distribution re-signer rewrites every Mach-O it finds in the app bundle
+# (CoreFP, CommerceCore and CommerceKit grew and changed hash in exported IPAs),
+# which fails SAPContext's byte-exact check on device. Ship each asset behind a
+# short non-Mach-O prefix so codesign leaves it alone; SAPContext strips it on load.
+ASSET_PREFIX = b'ASSPPSAP'
+ASSET_SUFFIX = '.sapdata'
 ASSETS = {
     'CommerceKit': (3271840, 'b84ff12c21987856c0a17b78f1ad82b73195a6dec5f3b208a17d245555a2c8a2'),
     'CommerceCore': (207744, 'c5401e57402230f3c876409d295319ddf1e61287bc882683c5d61277be7bc1f2'),
@@ -201,8 +207,13 @@ def prepare_build(root):
     resources = Path(os.environ['TARGET_BUILD_DIR']) / os.environ['UNLOCALIZED_RESOURCES_FOLDER_PATH'] / 'SAPAssets'
     resources.mkdir(parents=True, exist_ok=True)
     for name in ASSETS:
-        if not valid_asset(resources / name, ASSETS[name]):
-            shutil.copy2(assets / name, resources / name)
+        wrapped = ASSET_PREFIX + (assets / name).read_bytes()
+        target = resources / (name + ASSET_SUFFIX)
+        if not target.is_file() or target.read_bytes() != wrapped:
+            atomic_write(target, wrapped)
+        stale = resources / name
+        if stale.exists():
+            stale.unlink()
     # Ship the exact interpreter source alongside its license notices.
     source_archive = resources / 'Unicorn-source.tar.gz'
     if not source_archive.is_file() or hashlib.sha256(source_archive.read_bytes()).hexdigest() != ARCHIVE_SHA256:
