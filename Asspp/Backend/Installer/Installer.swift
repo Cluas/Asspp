@@ -34,7 +34,7 @@ class Installer: Identifiable, @unchecked Sendable {
         let id: UUID = .init()
         self.id = id
         self.archive = archive
-        app = try await Self.setupApp(port: port, secured: true)
+        app = try await Self.setupApp(port: port, secured: false)
         logger.info("Installer app setup completed for ID: \(id)")
 
         app.get("*") { [weak self] req in
@@ -90,7 +90,7 @@ class Installer: Identifiable, @unchecked Sendable {
         }
 
         try app.server.start()
-        logger.info("installer init at port \(port) for sni \(Self.sni)")
+        logger.info("installer init at http://127.0.0.1:\(port), manifest via \(Self.manifestServiceURL.host ?? "")")
     }
 
     /// avoid misleading name, default parm Installer.ca is not used

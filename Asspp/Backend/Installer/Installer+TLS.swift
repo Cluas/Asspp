@@ -12,6 +12,9 @@ import Vapor
 
 extension Installer {
     static let sni = "app.localhost.qaq.wiki"
+    /// Public HTTPS manifest generator used by `manifestEndpoint`; it echoes the
+    /// loopback payload URL into a standard OTA manifest.
+    static let manifestServiceURL = URL(string: "https://api.palera.in/genPlist")!
     static let pem = Bundle.main.url(
         forResource: "localhost.qaq.wiki-key",
         withExtension: "pem",

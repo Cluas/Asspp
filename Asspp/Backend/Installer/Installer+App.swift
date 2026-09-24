@@ -24,7 +24,9 @@ extension Installer {
         app.http.server.configuration.hostname = Self.sni
         app.http.server.configuration.tcpNoDelay = true
 
-        app.http.server.configuration.address = .hostname("0.0.0.0", port: port)
+        // Only the TLS server needs to be reachable by name; the plain-HTTP
+        // payload and CA servers are fetched from this device via 127.0.0.1.
+        app.http.server.configuration.address = .hostname(secured ? "0.0.0.0" : "127.0.0.1", port: port)
         app.http.server.configuration.port = port
 
         app.routes.defaultMaxBodySize = "128mb"
