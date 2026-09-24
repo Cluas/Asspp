@@ -418,6 +418,7 @@ jobs:
 
           RELEASE_BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}"
           IPA_URL="${RELEASE_BASE_URL}/${IPA_NAME}"
+          MACOS_ZIP_URL="${RELEASE_BASE_URL}/Asspp-${SHORT_SHA}-macOS.zip"
           MANIFEST_URL="${RELEASE_BASE_URL}/${MANIFEST_NAME}"
           OTA_URL="itms-services://?action=download-manifest&url=${MANIFEST_URL}"
 
@@ -484,6 +485,7 @@ jobs:
           - Bundle ID: \`${BUNDLE_ID}\`
           - Build number: \`${BUILD_NUMBER}\`
           - OTA install link: \`${OTA_URL}\`
+          - macOS app (unsigned zip, uploaded by the build-macos job a few minutes later): ${MACOS_ZIP_URL}
           EOF
 
           {
@@ -560,6 +562,7 @@ jobs:
 
           RELEASE_BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}"
           IPA_URL="${RELEASE_BASE_URL}/${IPA_NAME}"
+          MACOS_ZIP_URL="${RELEASE_BASE_URL}/Asspp-${SHORT_SHA}-macOS.zip"
 
           SITE_PATH="${RUNNER_TEMP}/pages-site"
           LATEST_DIR="${SITE_PATH}/ios/latest"
@@ -622,6 +625,7 @@ jobs:
               <p><a href="${LATEST_OTA_URL}">Tap to install or update</a></p>
               <p><a href="${RELEASE_URL}">Release details</a></p>
               <p><a href="${IPA_URL}">Direct IPA download</a></p>
+              <p><a href="${MACOS_ZIP_URL}">macOS app (zip)</a> — unsigned, built by the build-macos job, may lag the iOS build by a few minutes.</p>
             </body>
           </html>
           EOF
@@ -641,6 +645,7 @@ jobs:
               <p><a href="${SHA_OTA_URL}">Tap to install this version</a></p>
               <p><a href="${RELEASE_URL}">Release details</a></p>
               <p><a href="${IPA_URL}">Direct IPA download</a></p>
+              <p><a href="${MACOS_ZIP_URL}">macOS app (zip)</a> — unsigned, built by the build-macos job, may lag the iOS build by a few minutes.</p>
             </body>
           </html>
           EOF
@@ -686,6 +691,107 @@ jobs:
             echo "- OTA install page: ${PAGES_INSTALL_URL}"
             echo "- OTA manifest: ${PAGES_MANIFEST_URL}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The macOS app is what drives the "Installed" tab: it lists the apps on a
+  # paired iPhone through devicectl and updates them. Upstream's Mac zip has no
+  # SAP signer, so it cannot sign in any more either; build it from the same
+  # source as the IPA. Unsigned like upstream's compile.release.osx.sh: the app
+  # ends up ad-hoc signed without sandbox or hardened runtime, which is also
+  # what the bundled unicorn interpreter needs.
+  build-macos:
+    needs: detect-upstream
+    if: needs.detect-upstream.outputs.should_build == 'true'
+    runs-on: macos-26
+    env:
+      UPSTREAM_SHA: ${{ needs.detect-upstream.outputs.upstream_sha }}
+      SOURCE_REPO: ${{ needs.detect-upstream.outputs.source_repo }}
+      SHORT_SHA: ${{ needs.detect-upstream.outputs.short_sha }}
+      TAG_NAME: ${{ needs.detect-upstream.outputs.tag_name }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.UPSTREAM_SHA }}
+          path: source
+          fetch-depth: 1
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          for XCODE_APP in \
+            /Applications/Xcode_26.2.app \
+            /Applications/Xcode_16.4.app \
+            /Applications/Xcode_16.3.app \
+            /Applications/Xcode.app
+          do
+            if [ -d "${XCODE_APP}" ]; then
+              sudo xcode-select -s "${XCODE_APP}"
+              break
+            fi
+          done
+          xcodebuild -version
+
+      - name: Prepare native build tools
+        run: command -v cmake >/dev/null || brew install cmake
+
+      - name: Build macOS app
+        id: macos
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cat > Configuration/Developer.xcconfig <<'EOF'
+          // CI-generated: unsigned macOS build
+          DEVELOPMENT_TEAM =
+          CODE_SIGN_STYLE = Manual
+          CODE_SIGN_IDENTITY =
+          CODE_SIGN_IDENTITY[sdk=macosx*] =
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGNING_ALLOWED = NO
+          EOF
+          xcodebuild \
+            -workspace Asspp.xcworkspace \
+            -scheme Asspp \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData-macos" \
+            build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
+
+          APP_PATH="${RUNNER_TEMP}/DerivedData-macos/Build/Products/Release/Asspp.app"
+          test -d "${APP_PATH}"
+          ls "${APP_PATH}/Contents/Resources/SAPAssets"/*.sapdata
+
+          ZIP_NAME="Asspp-${SHORT_SHA}-macOS.zip"
+          ZIP_PATH="${RUNNER_TEMP}/${ZIP_NAME}"
+          ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+          {
+            echo "zip_name=${ZIP_NAME}"
+            echo "zip_path=${ZIP_PATH}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload to the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZIP_NAME: ${{ steps.macos.outputs.zip_name }}
+          ZIP_PATH: ${{ steps.macos.outputs.zip_path }}
+        run: |
+          set -euo pipefail
+          # build-release creates the release while this job runs; wait for it
+          # instead of serialising the two builds.
+          for _ in $(seq 1 40); do
+            if gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 30
+          done
+          gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          gh release upload "${TAG_NAME}" \
+            "${ZIP_PATH}#${ZIP_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+          echo "- macOS zip: https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/${ZIP_NAME}" >> "$GITHUB_STEP_SUMMARY"
 
   deploy-pages:
     needs:
