@@ -3,8 +3,9 @@ name: Upstream Signed iOS Build
 on:
   # The 30-minute upstream poll is off on this fork: upstream main cannot sign in
   # (empty 403, see Lakr233/Asspp#62), so a scheduled rebuild would replace the
-  # working SAP build behind /ios/latest. Dispatch by hand with source_repo=
-  # CloudOfEquality/Asspp source_branch=fix/sap until upstream ships a fix.
+  # working SAP build behind /ios/latest. Dispatch by hand with source_kind=fork
+  # source_branch=sap (fix/sap from Lakr233/Asspp#62 plus the re-signing-safe
+  # asset packaging) until upstream ships a fix.
   workflow_dispatch:
     inputs:
       source_kind:
