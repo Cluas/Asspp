@@ -208,6 +208,10 @@ jobs:
           done
           xcodebuild -version
 
+      - name: Prepare native build tools
+        run: |
+          command -v cmake >/dev/null || brew install cmake
+
       - name: Install signing assets
         id: signing
         env:
@@ -332,7 +336,8 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "${PWD}/build/Asspp.xcarchive" \
             clean archive \
-            CURRENT_PROJECT_VERSION="${BUILD_NUMBER}"
+            CURRENT_PROJECT_VERSION="${BUILD_NUMBER}" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
 
       - name: Export signed IPA
         id: export
