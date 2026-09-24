@@ -13,10 +13,10 @@
     {
       "identity" : "applepackage",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Lakr233/ApplePackage",
+      "location" : "https://github.com/Cluas/ApplePackage",
       "state" : {
-        "revision" : "28710fec47fa89dfdedf2bf47cc284a2334ddfdc",
-        "version" : "1.2.7"
+        "branch" : "sap",
+        "revision" : "010c9a87a43d1e0abd8875432ce90682816eaba4"
       }
     },
     {
